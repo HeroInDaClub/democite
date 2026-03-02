@@ -70,51 +70,52 @@
         const repo = 'democite';
         const folder = 'images';
 
+        // Функция для определения целевого размера canvas
+        function getTargetSize(imgWidth, imgHeight) {
+            // Максимальная ширина для отображения (можно менять под свои предпочтения)
+            const MAX_WIDTH = 1200;
+            // Но также учитываем ширину окна, чтобы на мобильных не было слишком широко
+            const windowWidth = window.innerWidth * 0.9; // 90% ширины окна с учётом отступов
+            const maxAllowed = Math.min(MAX_WIDTH, windowWidth);
+
+            if (imgWidth <= maxAllowed) {
+                // Изображение и так небольшое — оставляем как есть
+                return { width: imgWidth, height: imgHeight };
+            } else {
+                // Масштабируем, сохраняя пропорции
+                const ratio = maxAllowed / imgWidth;
+                return {
+                    width: maxAllowed,
+                    height: imgHeight * ratio
+                };
+            }
+        }
+
         async function loadImages() {
             const gallery = document.getElementById('gallery');
             gallery.innerHTML = '<div class="message">Загрузка...</div>';
-            console.log('Начинаем загрузку списка файлов...');
 
             try {
-                // 1. Запрос к GitHub API
                 const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${folder}`);
-                console.log('Статус ответа API:', response.status);
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ошибка ${response.status}`);
-                }
+                if (!response.ok) throw new Error('Не удалось загрузить список файлов');
 
                 const files = await response.json();
-                console.log('Получены файлы:', files);
-
-                // 2. Фильтруем изображения
                 const imageFiles = files.filter(file => 
                     file.type === 'file' && /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(file.name)
                 );
-                console.log('Найдено изображений:', imageFiles.length);
 
                 if (imageFiles.length === 0) {
                     gallery.innerHTML = '<div class="message">Нет загруженных дизайнов</div>';
                     return;
                 }
 
-                // 3. Очищаем галерею
                 gallery.innerHTML = '';
 
-                // 4. Обрабатываем каждый файл
                 for (const file of imageFiles) {
-                    console.log('Обрабатываем файл:', file.name);
                     try {
                         const imgResponse = await fetch(file.download_url);
-                        if (!imgResponse.ok) {
-                            console.warn('Не удалось загрузить', file.name);
-                            continue;
-                        }
                         const blob = await imgResponse.blob();
                         const url = URL.createObjectURL(blob);
-
-                        const canvas = document.createElement('canvas');
-                        const ctx = canvas.getContext('2d');
 
                         const img = new Image();
                         await new Promise((resolve, reject) => {
@@ -123,27 +124,33 @@
                             img.src = url;
                         });
 
-                        canvas.width = img.width;
-                        canvas.height = img.height;
-                        ctx.drawImage(img, 0, 0);
+                        // Определяем целевой размер canvas
+                        const target = getTargetSize(img.width, img.height);
 
-                        // Водяной знак с адаптивным размером
-                        const fontSize = Math.max(20, Math.floor(img.height * 0.05));
+                        // Создаём canvas нужного размера
+                        const canvas = document.createElement('canvas');
+                        canvas.width = target.width;
+                        canvas.height = target.height;
+                        const ctx = canvas.getContext('2d');
+
+                        // Рисуем изображение, масштабируя под canvas
+                        ctx.drawImage(img, 0, 0, target.width, target.height);
+
+                        // Водяной знак с размером шрифта относительно высоты canvas
+                        const fontSize = Math.max(16, Math.floor(target.height * 0.05));
                         ctx.font = `bold ${fontSize}px Arial`;
                         ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'middle';
-                        ctx.fillText('ДЛЯ ЗАКАЗЧИКА', canvas.width / 2, canvas.height - fontSize * 1.5);
+                        ctx.fillText('ДЛЯ ЗАКАЗЧИКА', target.width / 2, target.height - fontSize * 1.5);
 
                         gallery.appendChild(canvas);
                         URL.revokeObjectURL(url);
                     } catch (err) {
-                        console.error('Ошибка при обработке', file.name, err);
+                        console.warn('Ошибка обработки файла', file.name, err);
                     }
                 }
-                console.log('Загрузка завершена');
             } catch (error) {
-                console.error('Ошибка загрузки списка:', error);
                 gallery.innerHTML = `<div class="message">Ошибка: ${error.message}</div>`;
             }
         }
