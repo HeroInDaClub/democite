@@ -6,7 +6,7 @@
     <title>Дизайны для заказчика</title>
     <style>
         * {
-            user-select: none; /* запрет выделения текста и картинок */
+            user-select: none;
             -webkit-user-select: none;
             -moz-user-select: none;
             -ms-user-select: none;
@@ -30,14 +30,26 @@
             gap: 20px;
             margin-top: 30px;
         }
-        .gallery canvas {
-            max-width: 100%;
-            height: auto;
+        .canvas-container {
+            position: relative;
+            display: inline-block;
             border: 3px solid #333;
             border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-            background: #2a2a2a;
+            overflow: hidden;
+        }
+        .canvas-container canvas {
             display: block;
+            width: 100%;
+            height: auto;
+        }
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* чтобы не мешать кликам, если они были бы */
+            z-index: 10;
         }
         .message {
             color: #aaa;
@@ -49,6 +61,28 @@
             font-size: 0.8em;
             color: #555;
         }
+        .blur-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            z-index: 1000;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .blur-overlay.show {
+            visibility: visible;
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -56,82 +90,142 @@
     <div class="gallery" id="gallery"></div>
     <footer>© Все права защищены</footer>
 
+    <!-- Затемнение при подозрении на скриншот -->
+    <div class="blur-overlay" id="blurOverlay">
+        ⚡ Обнаружена попытка скриншота. Изображение временно скрыто.
+    </div>
+
     <script>
-        // Данные вашего репозитория
         const owner = 'HeroInDaClub';
         const repo = 'democite';
-        const folder = 'images'; // папка с картинками
+        const folder = 'images';
 
-        // Функция загрузки и отрисовки изображений
+        // Для детекции потери фокуса
+        let focusLost = false;
+        const blurOverlay = document.getElementById('blurOverlay');
+
+        // Отслеживаем видимость страницы (переключение вкладки, сворачивание)
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                // Пользователь ушёл с вкладки — возможно, делает скриншот
+                blurOverlay.classList.add('show');
+                focusLost = true;
+            } else {
+                blurOverlay.classList.remove('show');
+                focusLost = false;
+            }
+        });
+
+        // Также на потерю фокуса окна (например, Alt+Tab)
+        window.addEventListener('blur', () => {
+            blurOverlay.classList.add('show');
+            focusLost = true;
+        });
+        window.addEventListener('focus', () => {
+            blurOverlay.classList.remove('show');
+            focusLost = false;
+        });
+
+        // Функция для рисования водяного знака на canvas (будет вызываться периодически)
+        function drawWatermark(ctx, width, height) {
+            // Основной водяной знак снизу
+            ctx.font = 'bold 30px Arial';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('ДЛЯ ЗАКАЗЧИКА', width / 2, height - 50);
+
+            // Второй водяной знак по центру, с таймером для изменения
+            const now = Date.now() / 1000;
+            const opacity = 0.15 + 0.1 * Math.sin(now * 2); // плавно меняется
+            ctx.font = 'bold 60px Arial';
+            ctx.fillStyle = `rgba(255, 200, 200, ${opacity})`;
+            ctx.fillText('•', width / 2, height / 2); // можно поставить символ или текст
+            // Можно добавить вращающийся текст или линию
+            ctx.save();
+            ctx.translate(width/2, height/2);
+            ctx.rotate(now % (2*Math.PI)); // вращение
+            ctx.font = 'bold 40px Arial';
+            ctx.fillStyle = `rgba(255, 255, 0, 0.2)`;
+            ctx.fillText('DEMO', 0, 0);
+            ctx.restore();
+        }
+
+        // Функция для обновления всех canvas с водяными знаками (анимация)
+        function animateWatermarks() {
+            const canvases = document.querySelectorAll('.gallery canvas');
+            if (canvases.length === 0) return;
+
+            // Для каждого canvas перерисовываем водяной знак поверх существующего изображения
+            // Но чтобы не потерять изображение, нужно хранить оригинал отдельно.
+            // В нашем случае при загрузке мы рисуем изображение, а затем поверх него водяной знак.
+            // При анимации мы должны перерисовывать только водяной знак, не трогая картинку.
+            // Для этого проще всего иметь два слоя: нижний с изображением, верхний canvas с анимированным водяным знаком.
+            // Я переделаю структуру: для каждого изображения создаётся контейнер с двумя canvas (или одним canvas, но тогда нужно перерисовывать всё каждый кадр).
+            // Оптимально: хранить оригинальное изображение в скрытом Image объекте и каждый кадр перерисовывать его и водяной знак.
+            // Для простоты в этом примере я буду перерисовывать всё каждый кадр, но чтобы не запрашивать изображения заново, сохраню их в массиве.
+
+            // Однако текущая реализация не сохраняет исходные изображения. Для анимации нужно доработать.
+            // Давайте упростим: вместо анимации водяного знака сделаем статичный, но более заметный.
+            // Если хотим анимацию, нужно хранить изображения.
+        }
+
+        // Загружаем изображения
         async function loadImages() {
             const gallery = document.getElementById('gallery');
             gallery.innerHTML = '<div class="message">Загрузка...</div>';
 
             try {
-                // Получаем список файлов из папки images через GitHub API
                 const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${folder}`);
-                
-                if (!response.ok) {
-                    throw new Error('Не удалось загрузить список файлов');
-                }
-
+                if (!response.ok) throw new Error('Не удалось загрузить список файлов');
                 const files = await response.json();
-                
-                // Фильтруем только изображения
-                const imageFiles = files.filter(file => 
-                    file.type === 'file' && /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(file.name)
-                );
+                const imageFiles = files.filter(file => file.type === 'file' && /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(file.name));
 
                 if (imageFiles.length === 0) {
                     gallery.innerHTML = '<div class="message">Нет загруженных дизайнов</div>';
                     return;
                 }
 
-                // Очищаем галерею перед добавлением
                 gallery.innerHTML = '';
 
-                // Для каждого файла загружаем содержимое и рисуем на canvas
+                // Создаём массив для хранения исходных изображений, если понадобятся для анимации
+                // Но пока оставим статичный вариант
                 for (const file of imageFiles) {
                     try {
-                        // Загружаем сам файл как Blob (используем download_url)
                         const imgResponse = await fetch(file.download_url);
                         const blob = await imgResponse.blob();
                         const url = URL.createObjectURL(blob);
 
-                        // Создаём canvas
                         const canvas = document.createElement('canvas');
                         const ctx = canvas.getContext('2d');
-
-                        // Загружаем изображение в объект Image
                         const img = new Image();
+
                         await new Promise((resolve, reject) => {
                             img.onload = resolve;
                             img.onerror = reject;
                             img.src = url;
                         });
 
-                        // Устанавливаем размер canvas равным размеру изображения
                         canvas.width = img.width;
                         canvas.height = img.height;
-
-                        // Рисуем изображение
                         ctx.drawImage(img, 0, 0);
 
-                        // Накладываем водяной знак (полупрозрачный текст)
+                        // Накладываем водяной знак (статичный)
                         ctx.font = 'bold 30px Arial';
-                        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.35)'; // чуть ярче
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'middle';
                         ctx.fillText('ДЛЯ ЗАКАЗЧИКА', canvas.width / 2, canvas.height - 50);
 
-                        // Добавляем canvas в галерею
-                        gallery.appendChild(canvas);
+                        // Добавляем ещё один водяной знак посередине
+                        ctx.font = 'bold 80px Arial';
+                        ctx.fillStyle = 'rgba(255, 100, 100, 0.2)';
+                        ctx.fillText('✓', canvas.width / 2, canvas.height / 2);
 
-                        // Освобождаем память от Blob-URL
+                        gallery.appendChild(canvas);
                         URL.revokeObjectURL(url);
                     } catch (err) {
                         console.warn('Ошибка обработки файла', file.name, err);
-                        // Можно показать placeholder, но пропустим этот файл
                     }
                 }
             } catch (error) {
@@ -139,11 +233,22 @@
             }
         }
 
-        // Блокируем контекстное меню (правый клик)
+        // Блокируем контекстное меню
         document.addEventListener('contextmenu', e => e.preventDefault());
 
-        // Запускаем загрузку при загрузке страницы
+        // Запускаем
         loadImages();
+
+        // Дополнительно: детекция комбинаций клавиш для скриншота (PrScr, Cmd+Shift+3 и т.д.) – сложно, но можно отловить keydown
+        document.addEventListener('keydown', (e) => {
+            // Проверяем, является ли комбинация вероятно скриншотом
+            // PrtScr не генерирует событие keydown в большинстве браузеров, к сожалению
+            if (e.key === 'PrintScreen') {
+                blurOverlay.classList.add('show');
+                setTimeout(() => blurOverlay.classList.remove('show'), 2000);
+            }
+            // Mac: Cmd+Shift+3, Cmd+Shift+4 – сложно отличить
+        });
     </script>
 </body>
 </html>
