@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Дизайны для заказчика</title>
+    <style>
+        * {
+            user-select: none; /* запрет выделения текста и картинок */
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+        body {
+            background: #1e1e1e;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            color: #ccc;
+            font-weight: 300;
+        }
+        .gallery {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 30px;
+        }
+        .gallery canvas {
+            max-width: 100%;
+            height: auto;
+            border: 3px solid #333;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            background: #2a2a2a;
+            display: block;
+        }
+        .message {
+            color: #aaa;
+            font-size: 1.2em;
+            margin-top: 50px;
+        }
+        footer {
+            margin-top: 40px;
+            font-size: 0.8em;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <h1>Просмотр дизайнов</h1>
+    <div class="gallery" id="gallery"></div>
+    <footer>© Все права защищены</footer>
+
+    <script>
+        // Данные вашего репозитория
+        const owner = 'HeroInDaClub';
+        const repo = 'democite';
+        const folder = 'images'; // папка с картинками
+
+        // Функция загрузки и отрисовки изображений
+        async function loadImages() {
+            const gallery = document.getElementById('gallery');
+            gallery.innerHTML = '<div class="message">Загрузка...</div>';
+
+            try {
+                // Получаем список файлов из папки images через GitHub API
+                const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${folder}`);
+                
+                if (!response.ok) {
+                    throw new Error('Не удалось загрузить список файлов');
+                }
+
+                const files = await response.json();
+                
+                // Фильтруем только изображения
+                const imageFiles = files.filter(file => 
+                    file.type === 'file' && /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(file.name)
+                );
+
+                if (imageFiles.length === 0) {
+                    gallery.innerHTML = '<div class="message">Нет загруженных дизайнов</div>';
+                    return;
+                }
+
+                // Очищаем галерею перед добавлением
+                gallery.innerHTML = '';
+
+                // Для каждого файла загружаем содержимое и рисуем на canvas
+                for (const file of imageFiles) {
+                    try {
+                        // Загружаем сам файл как Blob (используем download_url)
+                        const imgResponse = await fetch(file.download_url);
+                        const blob = await imgResponse.blob();
+                        const url = URL.createObjectURL(blob);
+
+                        // Создаём canvas
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+
+                        // Загружаем изображение в объект Image
+                        const img = new Image();
+                        await new Promise((resolve, reject) => {
+                            img.onload = resolve;
+                            img.onerror = reject;
+                            img.src = url;
+                        });
+
+                        // Устанавливаем размер canvas равным размеру изображения
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+
+                        // Рисуем изображение
+                        ctx.drawImage(img, 0, 0);
+
+                        // Накладываем водяной знак (полупрозрачный текст)
+                        ctx.font = 'bold 30px Arial';
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText('ДЛЯ ЗАКАЗЧИКА', canvas.width / 2, canvas.height - 50);
+
+                        // Добавляем canvas в галерею
+                        gallery.appendChild(canvas);
+
+                        // Освобождаем память от Blob-URL
+                        URL.revokeObjectURL(url);
+                    } catch (err) {
+                        console.warn('Ошибка обработки файла', file.name, err);
+                        // Можно показать placeholder, но пропустим этот файл
+                    }
+                }
+            } catch (error) {
+                gallery.innerHTML = `<div class="message">Ошибка: ${error.message}</div>`;
+            }
+        }
+
+        // Блокируем контекстное меню (правый клик)
+        document.addEventListener('contextmenu', e => e.preventDefault());
+
+        // Запускаем загрузку при загрузке страницы
+        loadImages();
+    </script>
+</body>
+</html>
